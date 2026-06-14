@@ -20,7 +20,7 @@ pip install -e ".[gpu]"
 
 ## Getting the model weights
 
-Download `model-bundle-v0.1.0.tar.gz` from the [Releases page](https://github.com/amrhs-zohrevand/aipd-label-extension/releases) and extract it into `models/release/`:
+Download `model-bundle-v0.1.0.tar.gz` from the [v0.1.0 release](https://github.com/amrhs-zohrevand/aipd-label-extension/releases/tag/v0.1.0) and extract it into `models/release/`:
 
 ```bash
 tar -xf model-bundle-v0.1.0.tar.gz -C models/release/
