@@ -1,107 +1,91 @@
-# AIPD post-2023 label extension
+# aipd-label-extension
 
-This folder is the release candidate for the code that extends the USPTO
-Artificial Intelligence Patent Dataset (AIPD) beyond its official 2023
-publication coverage. It is intentionally self-contained and does not assume
-access to Snellius, the project repository, or any particular cloud provider.
+The USPTO's [Artificial Intelligence Patent Dataset (AIPD)](https://www.uspto.gov/ip-policy/economic-research/research-datasets/artificial-intelligence-patent-dataset) classifies U.S. patent documents into eight AI component categories. Official labels cover documents published through 2023. This package extends that coverage to later documents using the same eight-component label structure, so studies built on AIPD can include more recent patent applications without switching classification systems.
 
-The classifier reproduces the project's frozen extension procedure:
-
-1. Preserve each published application's abstract and ordered claims as two
-   separate text fields.
-2. Apply only mechanical text hygiene: remove NUL bytes, normalize line
-   endings, and trim outer whitespace.
-3. Apply the production long-chunk guards (24,000 characters for abstracts and
-   110,000 for claims), retaining the first chunk used by the frozen scorer.
-4. Embed the abstract and claims separately with
-   `Qwen/Qwen3-Embedding-8B`, using the model's pooled 4,096-dimensional
-   output and a 32,768-token context window.
-5. Score eight AIPD component models, each with separate abstract and claims
-   LSTM branches followed by a neural combination layer.
-6. Apply the frozen component-specific thresholds and define `any_ai` as the
-   logical OR over the eight component predictions.
-
-The model is an AIPD-compatible extension, not an official USPTO label. Inside
-official AIPD coverage, the official USPTO label remains authoritative.
-
-## What is included
-
-- `src/aipd_label_extension/`: portable text-to-label pipeline
-- `scripts/export_model_bundle.py`: exports the frozen weights, thresholds,
-  and manifest from the research project into a release bundle
-- `examples/example_patents.csv`: minimal input schema
-- `tests/`: tests for text handling, model scoring, and the any-AI rule
-
-The 66 MB frozen weight bundle is deliberately not stored in this Git
-repository. Before public release it should be attached to a GitHub release or
-placed in a versioned model repository. The export script creates the exact
-bundle from the research project's frozen artifacts.
-
-## Hardware
-
-The reference embedding backend uses `vLLM` on a CUDA GPU. It is suitable for
-a paid cloud GPU, a university cluster, or a Linux workstation with enough GPU
-memory for Qwen3-Embedding-8B. The classifier itself is small; embedding the
-text is the resource-intensive step. CPU-only execution is technically
-possible with a compatible backend, but is not a practical route for a large
-patent corpus.
+The extension trains on official AIPD@0.93 labels and reproduces their logic: embed the abstract and claims separately with `Qwen/Qwen3-Embedding-8B`, score eight frozen two-branch LSTM models, and define `any_ai` as the OR over component predictions. Official labels are never overwritten — the extension only fills the post-2023 gap.
 
 ## Installation
 
-Core scoring and tests:
+Scoring and tests (no GPU required):
 
 ```bash
-python -m pip install -e ".[test]"
+pip install -e ".[test]"
 ```
 
-Reference text-to-label pipeline on a CUDA/Linux machine:
+Full pipeline including the embedding step (requires a CUDA GPU):
 
 ```bash
-python -m pip install -e ".[gpu]"
+pip install -e ".[gpu]"
 ```
 
-## Export the frozen model
+## Getting the model weights
 
-From the main research repository:
+Download `model-bundle-v0.1.0.tar.gz` from the [Releases page](https://github.com/amrhs-zohrevand/aipd-label-extension/releases) and extract it into `models/release/`:
 
 ```bash
-python workspace/sandbox/aipd-label-extension-replication/scripts/export_model_bundle.py \
-  --output workspace/sandbox/aipd-label-extension-replication/models/release
+tar -xf model-bundle-v0.1.0.tar.gz -C models/release/
 ```
 
-The export script verifies every weight file against the hashes in the frozen
-model manifest before it writes the bundle.
+The bundle contains eight frozen `.pt` weight files and a `thresholds.json` with the component-specific decision thresholds selected during training.
 
-## Label a file
+## Usage
 
-Inputs may be CSV or Parquet and must contain `doc_id`, `abstract`, and
-`claims`. The `claims` field should contain all claims in their original
-sequence, joined with blank lines.
+Input files must be CSV or Parquet with three columns: `doc_id`, `abstract`, and `claims`. The `claims` field should contain all claims joined in their original order with blank lines between them.
 
 ```bash
 aipd-label-extension \
-  --input examples/example_patents.csv \
-  --output outputs/example_labels.parquet \
+  --input path/to/documents.csv \
+  --output path/to/labels.parquet \
   --model-bundle models/release \
   --backend vllm
 ```
 
-The output contains:
+See `examples/example_patents.csv` for a minimal input example.
 
-- one raw score and one binary prediction for each AIPD component;
-- `aipd_qwen_ac_score_any_ai`, the maximum component score, retained only as a
-  diagnostic because it is not a calibrated probability;
-- `aipd_qwen_ac_predict_any_ai`, the OR over component predictions;
-- model, text-version, and truncation metadata.
+### Output columns
 
-## Interpretation
+Each output row contains:
 
-The selected model was trained on 172,606 official-label documents and
-evaluated on a locked, population-weighted 99,791-document holdout. Against
-official AIPD@0.93 labels, it achieved 92.57% accuracy, 0.787 F1, 0.866 average
-precision, and 0.962 AUROC. The `0.93` in AIPD@0.93 is the USPTO teacher-label
-score threshold; it is not the accuracy of this extension model.
+| Column                                             | Description                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| `aipd_qwen_ac_score_<component>`                   | Raw sigmoid score for each of the eight AIPD components                  |
+| `aipd_qwen_ac_predict_<component>`                 | Binary prediction at the frozen component threshold                      |
+| `aipd_qwen_ac_predict_any_ai`                      | OR over the eight component predictions (main label)                     |
+| `aipd_qwen_ac_score_any_ai`                        | Maximum component score (diagnostic only, not a calibrated probability)  |
+| `model_version`, `label_source`                    | Provenance metadata                                                      |
+| `abstract_text_truncated`, `claims_text_truncated` | Whether the field was truncated before embedding                         |
 
-The public repository URL will be added to the paper appendix when this
-release candidate is moved into its own GitHub repository and the frozen model
-bundle is deposited.
+## Performance
+
+The model was selected at 5% of available training data (172,606 documents) after evaluating a learning curve on a locked 99,791-document holdout. Performance against official AIPD@0.93 labels:
+
+| Metric            | Value  |
+| ----------------- | ------ |
+| Accuracy          | 92.57% |
+| F1                | 0.787  |
+| Average precision | 0.866  |
+| AUROC             | 0.962  |
+
+The `0.93` in AIPD@0.93 is the USPTO's score threshold used to produce the teacher labels — it is not this model's accuracy.
+
+Component performance varies. Machine learning, NLP, speech, and vision components all reach F1 > 0.72. Evolutionary computation (F1 = 0.31) and knowledge processing (F1 = 0.58) are harder to reproduce, reflecting their rarity in the training data. For most research applications the `any_ai` OR label is the appropriate output; component-level predictions should be treated as diagnostics.
+
+## Hardware
+
+Embedding with `Qwen/Qwen3-Embedding-8B` requires a CUDA GPU with enough memory for an 8B-parameter model. The scoring step runs on CPU. A university cluster or cloud GPU instance works fine.
+
+## Tests
+
+```bash
+pytest tests/ -v
+```
+
+The suite covers text normalization, chunking, the OR rule, CSV/Parquet I/O, missing-column detection, empty-field filtering, and a full read→filter→score→write pipeline.
+
+## Citation
+
+If you use this package, please also cite the underlying AIPD dataset:
+
+> Giczy, A. V., Pairolero, N. A., & Toole, A. A. (2022). Identifying artificial intelligence (AI) invention: A novel AI patent dataset. *Journal of Technology Transfer*, 47(2), 476–505.
+>
+> Pairolero, N. A., et al. (2025). *Artificial Intelligence Patent Dataset: 2023 Update*. USPTO Office of the Chief Economist.
