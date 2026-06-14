@@ -1,0 +1,4 @@
+doc_id,abstract,claims
+example-1,"A system for optimizing a manufacturing schedule using a trained neural network.","1. A method comprising receiving production data and generating a schedule with a trained neural network.\n\n2. The method of claim 1, wherein the network is updated using observed delays."
+example-2,"A fastener assembly for joining two structural panels.","1. A fastener assembly comprising a threaded bolt and a locking nut.\n\n2. The assembly of claim 1, wherein the locking nut comprises a steel insert."
+
